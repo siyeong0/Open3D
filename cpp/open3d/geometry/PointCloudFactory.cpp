@@ -72,6 +72,7 @@ std::shared_ptr<PointCloud> CreatePointCloudFromFloatDepthImage(
     return pointcloud;
 }
 
+// Siyeong edited: calculate normals from depth
 template <typename TC, int NC>
 std::shared_ptr<PointCloud> CreatePointCloudFromRGBDImageT(
         const RGBDImage &image,
@@ -90,14 +91,19 @@ std::shared_ptr<PointCloud> CreatePointCloudFromRGBDImageT(
         num_valid_pixels = CountValidDepthPixels(image.depth_, 1);
     }
     pointcloud->points_.resize(num_valid_pixels);
+    pointcloud->normals_.resize(num_valid_pixels);
     pointcloud->colors_.resize(num_valid_pixels);
     int cnt = 0;
-    for (int i = 0; i < image.depth_.height_; i++) {
+    for (int i = 1; i < image.depth_.height_-1; i++) {
         float *p = (float *)(image.depth_.data_.data() +
                              i * image.depth_.BytesPerLine());
+        float *nb = (float *)(image.depth_.data_.data() +
+                             (i-1) * image.depth_.BytesPerLine());
+        float *ne = (float *)(image.depth_.data_.data() +
+                             (i+1) * image.depth_.BytesPerLine());
         TC *pc = (TC *)(image.color_.data_.data() +
                         i * image.color_.BytesPerLine());
-        for (int j = 0; j < image.depth_.width_; j++, p++, pc += NC) {
+        for (int j = 1; j < image.depth_.width_-1; j++, p++, nb++, ne++, pc += NC) {
             if (*p > 0) {
                 double z = (double)(*p);
                 double x = (j - principal_point.first) * z / focal_length.first;
@@ -106,6 +112,13 @@ std::shared_ptr<PointCloud> CreatePointCloudFromRGBDImageT(
                 Eigen::Vector4d point =
                         camera_pose * Eigen::Vector4d(x, y, z, 1.0);
                 pointcloud->points_[cnt] = point.block<3, 1>(0, 0);
+                Eigen::Vector4d normal = 
+                        Eigen::Vector4d(-((double)(*(p+1))-(double)(*(p-1))) / 2.0,
+                                        -((double)(*(ne))-(double)(*(nb))) / 2.0,
+                                        1.0, 0.0);
+                normal.normalize();
+                normal = camera_pose * normal;
+                pointcloud->normals_[cnt] = normal.block<3, 1>(0, 0);
                 pointcloud->colors_[cnt++] =
                         Eigen::Vector3d(pc[0], pc[(NC - 1) / 2], pc[NC - 1]) /
                         scale;
@@ -114,6 +127,10 @@ std::shared_ptr<PointCloud> CreatePointCloudFromRGBDImageT(
                 double x = std::numeric_limits<float>::quiet_NaN();
                 double y = std::numeric_limits<float>::quiet_NaN();
                 pointcloud->points_[cnt] = Eigen::Vector3d(x, y, z);
+                pointcloud->normals_[cnt] = 
+                        Eigen::Vector3d(std::numeric_limits<TC>::quiet_NaN(),
+                                        std::numeric_limits<TC>::quiet_NaN(),
+                                        std::numeric_limits<TC>::quiet_NaN());
                 pointcloud->colors_[cnt++] =
                         Eigen::Vector3d(std::numeric_limits<TC>::quiet_NaN(),
                                         std::numeric_limits<TC>::quiet_NaN(),
